@@ -1,0 +1,99 @@
+#!/bin/python
+
+import sys
+import requests
+
+registry = "192.168.50.3:5000"
+header = {'Accept': 'application/vnd.docker.distribution.manifest.v2+json'}
+
+
+def get_repos_name():
+    url = 'http://' + registry + '/v2/_catalog'
+    response = requests.get(url=url, headers=header)
+    if response.status_code == 200:
+        return response.json()['repositories']
+    return []
+
+
+def get_repo_tags(name):
+    url = 'http://' + registry + '/v2/' + name + '/tags/list'
+    response = requests.get(url=url, headers=header)
+    if response.status_code == 200:
+        return response.json()['tags']
+    return []
+
+
+def get_repo_digest(name, tag):
+    url = 'http://' + registry + '/v2/' + name + '/manifests/' + tag
+    response = requests.get(url=url, headers=header)
+    if response.status_code == 200:
+        return response.headers['Docker-Content-Digest']
+    return "null"
+
+
+def repo_ls():
+    repos = get_repos_name()
+    print('{:{width}}{}'.format("NAME", "TAGS", width=max(repos, key=len).__len__() + 3))
+    for image in repos:
+        tags = get_repo_tags(image)
+        if tags:
+            print('{:{width}}{}'.format(image, ','.join(tags), width=max(repos, key=len).__len__() + 3))
+
+
+def tags_rm(name, digest):
+    url = 'http://' + registry + '/v2/' + name + '/manifests/' + digest
+    response = requests.delete(url=url, headers=header)
+    if response.status_code != 202:
+        print('delete tag failed. digest: {}'.format(digest))
+
+
+def get_layers_digest(name, tag):
+    url = 'http://' + registry + '/v2/' + name + '/manifests/' + tag
+    response = requests.get(url=url, headers=header)
+    if response.status_code == 200:
+        digests = [dig['digest'] for dig in response.json()['layers']]
+        return digests
+    return []
+
+
+def layers_rm(name, digest):
+    url = 'http://' + registry + '/v2/' + name + '/manifests/' + digest
+    response = requests.delete(url=url, headers=header)
+    if response.status_code != 202:
+        print('delete layer failed. digest:{}'.format(digest))
+
+
+def repo_rm(name):
+    tags = get_repo_tags(name)
+    if tags:
+        repo_digest = get_repo_digest(name, tags[0])
+        layers_digest = get_layers_digest(name, tags[0])
+        tags_rm(name, repo_digest)
+        for dig in layers_digest:
+            layers_rm(name, dig)
+    else:
+        print('repository does not exist.')
+
+
+def usage():
+    print('USAGE:')
+    print('\t{} [OPTIONS]'.format(sys.argv[0]))
+    print('OPTIONS:')
+    print('\tls       \tget repositories list')
+    print('\trm <name>\tremove repository')
+
+
+def main():
+    if 'ls' in sys.argv:
+        repo_ls()
+    elif 'rm' in sys.argv:
+        if len(sys.argv) > 2:
+            repo_rm(sys.argv[2])
+        else:
+            usage()
+    else:
+        usage()
+
+
+if __name__ == "__main__":
+   main()
